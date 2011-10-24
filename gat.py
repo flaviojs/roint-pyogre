@@ -1,6 +1,8 @@
+#!/usr/bin/python
+# -*- coding: utf8 -*-
 """
 Interface with roint's GAT file format.
-Flávio J. Saraiva @ 2011-10-24 (Python 2.7.2)
+FlÃ¡vio J. Saraiva @ 2011-10-24 (Python 2.7.2)
 
 Requires:
     roint (C shared library) (https://gitorious.org/open-ragnarok/roint)
@@ -74,3 +76,6 @@ class GAT:
     def getCell (self, i):
         assert i >= 0 and i < self.getWidth() * self.getHeight()
         return self._gat[0].cells[i]
+
+    def getCells (self):
+        return self._gat[0].cells[: self.getWidth() * self.getHeight()]
