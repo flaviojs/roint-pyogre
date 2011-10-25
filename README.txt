@@ -7,3 +7,7 @@ Windows:
 	2) copy roint.dll and it's depencies here (zlib1.dll)
 	3) open the command line here
 	4) run the python app script
+
+URLs:
+	roint - https://gitorious.org/open-ragnarok/roint
+	pyogre - http://www.pythonogre.com/
