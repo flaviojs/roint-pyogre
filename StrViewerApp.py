@@ -4,11 +4,11 @@
 Application to view a STR.
 Flávio J. Saraiva @ 2011-10-24 (Python 2.7.2, ogre 1.7.2)
 
-XXX /!\ Work in progress /!\
-    Still not sure how effect animations should be implemented. :/
-    This is the 3rd approach tried. (i don't have much knowledge about ogre or rendering in general)
-    Broken in lots of ways but at least it shows something...
-    Commiting to repo and taking a rest from this headache... >.<
+XXX It's in a decent state now. Dunno if this is the correct way to interpret the STR data yet.
+TODO used a proper animation instead of rebuilding each frame
+TODO turn magenta pixels into transparent pixels for bmp/jpg (they don't have alpha)
+TODO figure out if morphing is being done correctly (ex: which keyframe's blend mode should be used)
+TODO figure out coordiante system used in the STR
 
 Requires:
     ogre (http://www.pythonogre.com/)
@@ -38,11 +38,6 @@ class StrHandler(ogre.FrameListener):
         ogre.FrameListener.__init__(self)
         self.app = app
         self.rostr = app.rostr
-        self.materials = None
-        self.isLayerDrawn = None
-        self.aiCurAniKey = None
-        self.layerId2sectionId = None
-        self.vertexbuf = None
         self.mo = None
         self.layerId2keyframes = dict()
         self.layerId2material = dict()
@@ -81,6 +76,8 @@ class StrHandler(ogre.FrameListener):
                 name,
                 ogre.ResourceGroupManager.DEFAULT_RESOURCE_GROUP_NAME)
             self.layerId2material[layerId] = material
+        material.setLightingEnabled(False)
+        material.setDepthWriteEnabled(False)
         material.setSceneBlending(
             self.getBlendFactor(frame.srcalpha),
             self.getBlendFactor(frame.destalpha))
@@ -89,8 +86,9 @@ class StrHandler(ogre.FrameListener):
         texture = self.app.getTextureByName(texturepath)
         materialpass = material.getTechnique(0).getPass(0)
         materialpass.removeAllTextureUnitStates()
+        textureunitstate = materialpass.createTextureUnitState(texture)
+        textureunitstate.setTextureAddressingMode(ogre.TextureUnitState.TAM_CLAMP)
         if frame.mtpreset == 0:
-            textureunitstate = materialpass.createTextureUnitState(texture)
             textureunitstate.setTextureCoordSet(0)
             textureunitstate.setColourOperationEx(
                 ogre.LayerBlendOperationEx.LBX_MODULATE,
@@ -99,7 +97,6 @@ class StrHandler(ogre.FrameListener):
                 ogre.LayerBlendOperationEx.LBX_MODULATE,
                 ogre.LayerBlendSource.LBS_TEXTURE)
         elif frame.mtpreset == 1 or frame.mtpreset == 2:
-            textureunitstate = materialpass.createTextureUnitState(texture)
             textureunitstate.setTextureCoordSet(0)
             textureunitstate.setColourOperationEx(
                 ogre.LayerBlendOperationEx.LBX_MODULATE,
@@ -108,7 +105,6 @@ class StrHandler(ogre.FrameListener):
                 ogre.LayerBlendOperationEx.LBX_SOURCE1,
                 ogre.LayerBlendSource.LBS_TEXTURE)
         elif frame.mtpreset == 3:
-            textureunitstate = materialpass.createTextureUnitState(texture)
             textureunitstate.setTextureCoordSet(0)
             textureunitstate.setColourOperationEx(
                 ogre.LayerBlendOperationEx.LBX_ADD,
@@ -116,7 +112,6 @@ class StrHandler(ogre.FrameListener):
             textureunitstate.setAlphaOperation(
                 ogre.LayerBlendOperationEx.LBX_SOURCE2)
         elif frame.mtpreset == 4:
-            textureunitstate = materialpass.createTextureUnitState(texture)
             textureunitstate.setTextureCoordSet(0)
             textureunitstate.setColourOperationEx(
                 ogre.LayerBlendOperationEx.LBX_BLEND_TEXTURE_ALPHA,
@@ -128,7 +123,7 @@ class StrHandler(ogre.FrameListener):
             assert False
         return material
 
-    def getMorphedFrame (self, frameId, prevframe, nextframe):
+    def getMorphedFrame (self, layerId, frameId, prevframe, nextframe):
         """Return a morphed frame."""
         if frameId <= prevframe.framenum:
             return prevframe
@@ -163,10 +158,32 @@ class StrHandler(ogre.FrameListener):
         frame.crG = getValue(prevframe.crG, nextframe.crG)
         frame.crB = getValue(prevframe.crB, nextframe.crB)
         frame.crA = getValue(prevframe.crA, nextframe.crA)
-        frame.aniframe = prevframe.aniframe # TODO different for keyframe.anitype == 5?
-        frame.srcalpha = prevframe.srcalpha
-        frame.destalpha = prevframe.destalpha
-        frame.mtpreset = prevframe.mtpreset
+        aniframe = prevframe.aniframe # TODO check how it's morphed...
+        if nextframe.anitype == 0:
+            pass
+        elif nextframe.anitype == 1: # add aniframe
+            aniframe = getValue(aniframe, aniframe + nextframe.aniframe * framediff)
+        elif nextframe.anitype == 2: # add anidelta, limit
+            aniframe = getValue(aniframe, aniframe + nextframe.anidelta * framediff)
+            texturecount = len(self.rostr.getTextures(layerId))
+            if aniframe >= texturecount:
+                aniframe = texturecount - 1
+        elif nextframe.anitype == 3: # add anidelta, loop
+            aniframe = getValue(aniframe, aniframe + nextframe.anidelta * framediff)
+            texturecount = len(self.rostr.getTextures(layerId))
+            if aniframe >= texturecount:
+                aniframe = aniframe % texturecount
+        elif nextframe.anitype == 4: # subtract anidelta, loop
+            aniframe = getValue(aniframe, aniframe - nextframe.anidelta * framediff)
+            texturecount = len(self.rostr.getTextures(layerId))
+            if aniframe < 0:
+                aniframe = aniframe % texturecount
+        else: # TODO
+            DEBUG('getLayerKeyframes','anitype', prevframe.anitype, nextframe.anitype, 'TODO')
+        frame.aniframe = aniframe
+        frame.srcalpha = prevframe.srcalpha # TODO which keyframe?
+        frame.destalpha = prevframe.destalpha # TODO which keyframe?
+        frame.mtpreset = prevframe.mtpreset # TODO which keyframe?
         return frame
 
     def getLayerKeyframes (self, layerId):
@@ -218,12 +235,12 @@ class StrHandler(ogre.FrameListener):
                     if aniframe >= texturecount:
                         aniframe = aniframe % texturecount
                 elif keyframe.anitype == 4: # subtract anidelta, loop
-                    aniframe += keyframe.anidelta
+                    aniframe -= keyframe.anidelta
                     texturecount = len(self.rostr.getTextures(layerId))
                     if aniframe < 0:
                         aniframe = aniframe % texturecount
                 else: # TODO
-                    DEBUG('TODO','anitype', keyframe.anitype)
+                    DEBUG('getLayerKeyframes','anitype', keyframe.anitype, 'TODO')
                 frame.aniframe = aniframe
             layer[keyframe.framenum] = frame
         return layer
@@ -246,7 +263,7 @@ class StrHandler(ogre.FrameListener):
         # |   |
         # 0---1
         mo = self.mo
-        z = 1 / 32236.0
+        z = 0
         if frame.ax[0] < frame.ax[1]:
             x = frame.ax[:]
             u = [frame.u, frame.u + frame.us]
@@ -256,7 +273,7 @@ class StrHandler(ogre.FrameListener):
             x = [x[1], x[0], x[3], x[2]]
             u = [frame.u + frame.us, frame.u]
             u2 = [frame.u2 + frame.us2, frame.u2]
-        if frame.ay[0] < frame.ay[1]:
+        if -frame.ay[0] < -frame.ay[1]:
             y = frame.ay[:]
             v = [frame.v, frame.v + frame.vs]
             v2 = [frame.v2, frame.v2 + frame.vs2]
@@ -275,24 +292,27 @@ class StrHandler(ogre.FrameListener):
         cosvalue = math.cos(angle)
         material = self.getLayerMaterial(layerId, frame)
         mo.begin(material.getName(), ogre.RenderOperation.OT_TRIANGLE_LIST)
-        for i in range(0,4):
-            x[i] = x[i] * cosvalue - y[i] * sinvalue + frame.x - 320
-            y[i] = y[i] * cosvalue + y[i] * sinvalue + frame.y - 240
+        for i in range(0, 4):
+            oldx, oldy = x[i], y[i]
+            x[i] = oldx * cosvalue - oldy * sinvalue
+            y[i] = oldy * cosvalue + oldx * sinvalue
+            x[i] = x[i] + frame.x - 320
+            y[i] = y[i] - frame.y + 240
         mo.position(x[0], y[0], z)
-        mo.textureCoord(u[0], v[1])
-        mo.textureCoord(u2[0], v2[1])
+        mo.textureCoord(u[0], v[0])
+        mo.textureCoord(u2[0], v2[0])
         mo.colour(vertcolor)
         mo.position(x[1], y[1], z)
+        mo.textureCoord(u[1], v[0])
+        mo.textureCoord(u2[1], v2[0])
+        mo.colour(vertcolor)
+        mo.position(x[2], y[2], z)
         mo.textureCoord(u[1], v[1])
         mo.textureCoord(u2[1], v2[1])
         mo.colour(vertcolor)
-        mo.position(x[2], y[2], z)
-        mo.textureCoord(u[1], v[0])
-        mo.textureCoord(u2[1], v2[1])
-        mo.colour(vertcolor)
         mo.position(x[3], y[3], z)
-        mo.textureCoord(u[0], v[0])
-        mo.textureCoord(u2[0], v2[0])
+        mo.textureCoord(u[0], v[1])
+        mo.textureCoord(u2[0], v2[1])
         mo.colour(vertcolor)
         mo.triangle(0, 1, 2)
         mo.triangle(0, 2, 3)
@@ -304,6 +324,7 @@ class StrHandler(ogre.FrameListener):
         mo.clear()
         mo.estimateVertexCount(4 * len(self.layerId2keyframes))
         mo.estimateIndexCount(6 * len(self.layerId2keyframes))
+        hasFrames = False
         for layerId in sorted(self.layerId2keyframes.keys()):
             frames = self.layerId2keyframes[layerId]
             prevframe = None
@@ -314,12 +335,16 @@ class StrHandler(ogre.FrameListener):
                     # check next keyframe
                 elif frame.framenum == self.frameId:
                     self.addGeometry(layerId, frame)
+                    hasFrames = True
                     break # layer is done
                 else:# frame.framenum > self.frameId:
                     if prevframe:
-                        frame = self.getMorphedFrame(self.frameId, prevframe, frame)
+                        frame = self.getMorphedFrame(layerId, self.frameId, prevframe, frame)
                         self.addGeometry(layerId, frame)
+                    hasFrames = True
                     break # layer is done
+        if not hasFrames and self.frameId != 0:
+            self.restart()
 
     def createObject (self):
         if self.rostr.getLayers() is None:
@@ -338,22 +363,28 @@ class StrHandler(ogre.FrameListener):
             self.layerId2keyframes[layerId] = frames
 
         # build frame
-        DEBUG("framecount",self.rostr.getFrameCount())
-        DEBUG("fps",self.rostr.getFPS())
-        self.fps = 20#self.rostr.getFPS()
-        self.duration = float(self.rostr.getFrameCount()) / self.fps
-        DEBUG("self.fps",self.fps)
-        DEBUG("self.duration",self.duration)
-        self.frameId = 0
+        # XXX official client behaviour: -.-'
+        #   - framecount is hardcoded???
+        #   - fps is ignored, it just draws the next frame each processing cycle???
+        #self.framecount = self.rostr.getFrameCount()
+        #self.fps = self.rostr.getFPS()
+        #self.duration = float(self.framecount) / self.fps
+        #DEBUG("self.framecount", self.framecount)
+        #DEBUG("self.fps", self.fps)
+        #DEBUG("self.duration", self.duration)
+        self.fps = 30
+        self.restart()
+        return mo
+
+    def restart (self):
+        DEBUG("restart")
+        self.frameId = 0;
         self.timeSinceStart = 0.0
         self.updateGeometry()
-        return mo
 
     def frameStarted (self, evt):
         """Called when a frame is about to begin rendering."""
         self.timeSinceStart += evt.timeSinceLastFrame
-        while self.timeSinceStart >= self.duration:
-            self.timeSinceStart -= self.duration
         frameId = int(self.fps * self.timeSinceStart)
         if self.frameId != frameId:
             DEBUG('frameStarted', frameId, "timeSinceStart", self.timeSinceStart)
@@ -424,12 +455,19 @@ class StrViewerApp(sf.Application):
             DEBUG(name)
             stream = self.openDataStream(name)
             assert stream, "failed to load texture %s" % name
+            root,ext = os.path.splitext(filename)
+            ext = ext.lower()
             image = ogre.Image()
             image.load(stream)
+            if ext == '.bmp' or ext == '.jpg':
+                desiredFormat = ogre.PixelFormat.PF_A1R5G5B5
+            else:
+                desiredFormat = ogre.PixelFormat.PF_UNKNOWN
             texture = ogre.TextureManager.getSingleton().loadImage(
                 name,
                 ogre.ResourceGroupManager.DEFAULT_RESOURCE_GROUP_NAME,
-                image)
+                image,
+                desiredFormat=desiredFormat)
             self.textures[name] = texture
         return name
 
