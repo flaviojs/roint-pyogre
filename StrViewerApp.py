@@ -2,7 +2,7 @@
 # -*- coding: utf8 -*-
 """
 Application to view a STR.
-Flávio J. Saraiva @ 2011-10-24 (Python 2.7.2, ogre 1.7.2)
+Flávio J. Saraiva @ 2011-11-17 (Python 2.7.2, ogre 1.7.2)
 
 TODO used a proper animation instead of rebuilding each frame
 TODO turn magenta pixels into transparent pixels for bmp/jpg (they don't have alpha)
