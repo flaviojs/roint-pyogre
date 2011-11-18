@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf8 -*-
 """
-Application to view a STR.
+Application to view a STR. (effect animation)
 Flávio J. Saraiva @ 2011-11-17 (Python 2.7.2, ogre 1.7.2)
 
 TODO used a proper animation instead of rebuilding each frame
@@ -30,13 +30,11 @@ def DEBUG (*args):
     pass
 
 
-def duplicateKeyframe(keyframe):
-    frame = ROStrKeyFrame()
+def copyKeyframe (frame, keyframe):
     ctypes.memmove(
         ctypes.byref(frame),
         ctypes.byref(keyframe),
         ctypes.sizeof(ROStrKeyFrame))
-    return frame
 
 
 class StrLayerData:
@@ -44,8 +42,8 @@ class StrLayerData:
         self.layerId = layerId
         self.material = None # ogre.Material
         self.keyframeId = -1
-        self.frame = None # ROStrKeyFrame
-        self.lastFrameId = -1
+        self.frame = ROStrKeyFrame()
+        self.lastFrameId = 0
 
 
 class StrHandler(ogre.FrameListener):
@@ -133,97 +131,114 @@ class StrHandler(ogre.FrameListener):
             assert False
         return material
 
-    def morphLayerData (self, data, framecount):
-        """Morphs the layer data up to the current frameId."""
-        if data.keyframeId == -1:
-            return # layer already ended
-        if data.frame.framenum >= self.frameId:
-            return # not there yet
+    def morphLayerDataSingle (self, data, curFrameId):
+        """Morphs the layer data of a single frame."""
         keyframes = self.rostr.getKeyFrames(data.layerId)
-        # find last normal keyframe in range
-        for keyframeId in range(data.keyframeId + 1, len(keyframes)):
-            keyframe = keyframes[keyframeId]
-            if keyframe.framenum > self.frameId:
-                break # keyframe is too far
-            if keyframe.type == 0:
-                # normal keyframe
-                framecount = self.frameId - keyframe.framenum
-                assert framecount >= 0
-                data.frame = duplicateKeyframe(keyframe)
-                data.keyframeId = keyframeId
-        # check next keyframe
+        assert data.keyframeId + 1 < len(keyframes) # must have next keyframe
+        keyframe = keyframes[data.keyframeId + 1]
+        if data.keyframeId != 0 and keyframe.framenum == curFrameId:
+            data.keyframeId += 1 # next keyframe
         if data.keyframeId + 1 >= len(keyframes):
-            data.keyframeId = -1 # end of layer
-        elif framecount > 0:
+            #DEBUG('morphLayerDataSingle', data.layerId, 'end of layer (keyframeId=%d)' % data.keyframeId)
+            data.keyframeId = -1
+            return # end of layer
+        keyframe = keyframes[data.keyframeId]
+        if keyframe.framenum > curFrameId:
+            return # not there yet
+        if keyframe.type == 0:
+            # normal keyframe
+            #DEBUG('morphLayerData', data.layerId, 'normal keyframe (%d)' % keyframe.framenum)
+            copyKeyframe(data.frame, keyframe)
             keyframe = keyframes[data.keyframeId + 1]
-            if keyframe.framenum <= self.frameId and keyframe.type == 1:
-                # morph keyframe
-                frame = data.frame
-                frame.x += keyframe.x * framecount
-                frame.y += keyframe.y * framecount
-                frame.u += keyframe.u * framecount
-                frame.v += keyframe.v * framecount
-                frame.us += keyframe.us * framecount
-                frame.vs += keyframe.vs * framecount
-                frame.u2 += keyframe.u2 * framecount
-                frame.v2 += keyframe.v2 * framecount
-                frame.us2 += keyframe.us2 * framecount
-                frame.vs2 += keyframe.vs2 * framecount
-                frame.ax[0] += keyframe.ax[0] * framecount
-                frame.ax[1] += keyframe.ax[1] * framecount
-                frame.ax[2] += keyframe.ax[2] * framecount
-                frame.ax[3] += keyframe.ax[3] * framecount
-                frame.ay[0] += keyframe.ay[0] * framecount
-                frame.ay[1] += keyframe.ay[1] * framecount
-                frame.ay[2] += keyframe.ay[2] * framecount
-                frame.ay[3] += keyframe.ay[3] * framecount
-                frame.rz += keyframe.rz * framecount
-                frame.crR += keyframe.crR * framecount
-                frame.crG += keyframe.crG * framecount
-                frame.crB += keyframe.crB * framecount
-                frame.crA += keyframe.crA * framecount
-                aniframe = frame.aniframe
-                texturecount = len(self.rostr.getTextures(data.layerId))
-                if keyframe.anitype == 0: # do nothing
-                    pass
-                elif keyframe.anitype == 1: # add aniframe  ]-inf,inf[
-                    aniframe += keyframe.aniframe * framecount
-                elif keyframe.anitype == 2: # add anidelta, limit  ]-inf,texturecount[
-                    aniframe += keyframe.anidelta * framecount
-                    if aniframe >= texturecount:
-                        aniframe = texturecount - 1
-                elif keyframe.anitype == 3: # add anidelta, loop  [0.0,texturecount[
-                    aniframe += keyframe.anidelta * framecount
-                    if aniframe >= texturecount:
-                        aniframe = aniframe % texturecount
-                elif keyframe.anitype == 4: # subtract anidelta, loop  [0.0,texturecount[  WARNING broken on 2004 client
-                    aniframe -= keyframe.anidelta * framecount
-                    if aniframe < 0:
-                        aniframe = aniframe % texturecount
-                elif keyframe.anitype == 5: # randomize with anidelta seed???  [0,ROStrLayer.texturecount - 1]
-                    for frameId in range(self.frameId - framecount, self.frameId + 1):
-                        value = (int)(aniframe + (frameId - frame.framenum) * keyframe.anidelta)
-                        lasttex = texturecount - 1
-                        n = value / lasttex
-                        if n & 1:
-                            aniframe = lasttex * (n + 1) - value
-                        else:
-                            aniframe = value - lasttex * n
+            if keyframe.framenum == curFrameId:
+                data.keyframeId += 1
+        elif keyframe.type == 1:
+            # morph keyframe
+            #DEBUG('morphLayerData', data.layerId, 'morph keyframe (%d,%d)' %(keyframe.framenum, curFrameId))
+            frame = data.frame
+            frame.x += keyframe.x
+            frame.y += keyframe.y
+            frame.u += keyframe.u
+            frame.v += keyframe.v
+            frame.us += keyframe.us
+            frame.vs += keyframe.vs
+            frame.u2 += keyframe.u2
+            frame.v2 += keyframe.v2
+            frame.us2 += keyframe.us2
+            frame.vs2 += keyframe.vs2
+            frame.ax[0] += keyframe.ax[0]
+            frame.ax[1] += keyframe.ax[1]
+            frame.ax[2] += keyframe.ax[2]
+            frame.ax[3] += keyframe.ax[3]
+            frame.ay[0] += keyframe.ay[0]
+            frame.ay[1] += keyframe.ay[1]
+            frame.ay[2] += keyframe.ay[2]
+            frame.ay[3] += keyframe.ay[3]
+            frame.rz += keyframe.rz
+            frame.crR += keyframe.crR
+            frame.crG += keyframe.crG
+            frame.crB += keyframe.crB
+            frame.crA += keyframe.crA
+            aniframe = frame.aniframe
+            texturecount = len(self.rostr.getTextures(data.layerId))
+            if keyframe.anitype == 0: # do nothing
+                pass
+            elif keyframe.anitype == 1: # add aniframe  ]-inf,inf[
+                aniframe += keyframe.aniframe
+            elif keyframe.anitype == 2: # add anidelta, limit  ]-inf,texturecount[
+                aniframe += keyframe.anidelta
+                if aniframe >= texturecount:
+                    aniframe = texturecount - 1
+            elif keyframe.anitype == 3: # add anidelta, loop  [0.0,texturecount[
+                aniframe += keyframe.anidelta
+                if aniframe >= texturecount:
+                    aniframe = aniframe % texturecount
+            elif keyframe.anitype == 4: # subtract anidelta, loop  [0.0,texturecount[  WARNING broken on 2004 client
+                aniframe -= keyframe.anidelta
+                if aniframe < 0:
+                    aniframe = aniframe % texturecount
+            elif keyframe.anitype == 5: # randomize with anidelta seed???  [0,ROStrLayer.texturecount - 1]
+                value = (int)(aniframe + (curFrameId - frame.framenum) * keyframe.anidelta)
+                lasttex = texturecount - 1
+                n = value / lasttex
+                if n & 1:
+                    aniframe = lasttex * (n + 1) - value
                 else:
-                    DEBUG('morphLayerData', 'anitype', keyframe.anitype, 'TODO')
-                frame.aniframe = aniframe
+                    aniframe = value - lasttex * n
+            else:
+                DEBUG('morphLayerData', data.layerId, 'keyframe.anitype', keyframe.anitype, 'TODO')
+            frame.aniframe = aniframe
+        else:
+            DEBUG('morphLayerData', data.layerId, 'keyframe.type', keyframe.type, 'TODO')
+            assert False
         self.updateLayerMaterial(data)
+
+    def morphLayerData (self, data, lastFrameId):
+        """Morphs the layer data up to the current frameId."""
+        #DEBUG('morphLayerData', data.layerId)
+        keyframes = self.rostr.getKeyFrames(data.layerId)
+        # process each frame
+        for curFrameId in range(lastFrameId + 1, self.frameId + 1):
+            #DEBUG('morphLayerData', data.layerId, 'curFrameId', curFrameId)
+            if data.keyframeId == -1:
+                #DEBUG('morphLayerData', data.layerId, 'layer done')
+                break # layer already ended
+            if data.keyframeId + 1 >= len(keyframes):
+                #DEBUG('morphLayerData', data.layerId, 'end of layer (keyframeId=%d)' % data.keyframeId)
+                data.keyframeId = -1
+                break # end of layer
+            self.morphLayerDataSingle(data, curFrameId)
 
     def getLayerData (self, layerId):
         keyframes = self.rostr.getKeyFrames(layerId)
         if keyframes is None:
-            return None
+            return None # discard layer
         data = StrLayerData(layerId)
         materialname = "StrMaterial/Layer%d" % layerId
         data.material = ogre.MaterialManager.getSingleton().create(
             materialname,
             ogre.ResourceGroupManager.DEFAULT_RESOURCE_GROUP_NAME)
-        data.frame = duplicateKeyframe(keyframes[0])
+        data.keyframeId = -1
         data.lastFrameId = keyframes[len(keyframes) - 1].framenum
         return data
 
@@ -339,13 +354,13 @@ class StrHandler(ogre.FrameListener):
         self.mo = mo
         # get layer data
         self.layerId2data = dict()
-        self.lastFrameId = -1
+        lastFrameId = -1
         for layerId in range(0, len(self.rostr.getLayers())):
             data = self.getLayerData(layerId)
             if data:
                 self.layerId2data[layerId] = data
-                if self.lastFrameId < data.lastFrameId:
-                    self.lastFrameId = data.lastFrameId
+                if lastFrameId < data.lastFrameId:
+                    lastFrameId = data.lastFrameId
         # XXX official client behaviour: -.-'
         #   - framecount is hardcoded???
         #   - fps is ignored, it just draws the next frame each processing cycle???
@@ -354,8 +369,8 @@ class StrHandler(ogre.FrameListener):
         #self.duration = float(self.framecount) / self.fps
         #DEBUG("self.framecount", self.framecount)
         self.fps = 30
-        self.duration = self.lastFrameId / self.fps
-        DEBUG("self.lastFrameId", self.lastFrameId)
+        self.duration = lastFrameId / self.fps
+        DEBUG("self.lastFrameId", lastFrameId)
         DEBUG("self.fps", self.fps)
         DEBUG("self.duration", self.duration)
         self.restart()
@@ -363,25 +378,25 @@ class StrHandler(ogre.FrameListener):
 
     def restart (self):
         DEBUG("restart")
-        self.frameId = 0;
         self.timeSinceStart = 0.0
+        self.frameId = -1;
         for layerId in self.layerId2data.keys():
             data = self.layerId2data[layerId]
             data.keyframeId = 0
-            data.frame = duplicateKeyframe(self.rostr.getKeyFrames(layerId)[0])
+            keyframe = self.rostr.getKeyFrames(layerId)[0]
+            copyKeyframe(data.frame, keyframe)
+            assert data.frame.type == 0
             self.updateLayerMaterial(data)
-        self.updateGeometry()
 
     def frameStarted (self, evt):
         """Called when a frame is about to begin rendering."""
+        lastFrameId = self.frameId
         self.timeSinceStart += evt.timeSinceLastFrame
-        frameId = int(self.fps * self.timeSinceStart)
-        if self.frameId != frameId:
-            framecount = frameId - self.frameId
-            self.frameId = frameId
-            DEBUG('frameStarted', self.frameId, "(%d)" % framecount, "timeSinceStart", self.timeSinceStart)
+        self.frameId = int(self.fps * self.timeSinceStart)
+        if self.frameId != lastFrameId:
+            DEBUG('frameStarted', self.frameId, "(%d)" % (self.frameId - lastFrameId), "timeSinceStart", self.timeSinceStart)
             for data in self.layerId2data.values():
-                self.morphLayerData(data, framecount)
+                self.morphLayerData(data, lastFrameId)
             self.updateGeometry()
         return True
 
