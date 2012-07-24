@@ -1,4 +1,4 @@
-Flávio J. Saraiva @ 2001-10-24
+Flávio J. Saraiva @ 2011-10-24
 
 This repo contains a collection of pyogre apps created to test roint file formats.
 
